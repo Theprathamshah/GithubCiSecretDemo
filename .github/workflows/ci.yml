@@ -1,0 +1,71 @@
+name: Update Github Secret
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Publish Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      repository-projects: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Read Secret
+        id: api_call
+        env:
+          SECRET_VALUE: ${{ secrets.MY_SECRET_VALUE }}
+        run: |
+          echo "Current Secret Value: $SECRET_VALUE"
+
+          # Fetch a new joke using the API
+          RESPONSE=$(curl -H "Accept: application/json" https://icanhazdadjoke.com/ || echo '{"joke": "No joke found!"}')
+          
+          # Extract the joke
+          NEW_VALUE=$(echo "$RESPONSE" | jq -r '.joke')
+
+          echo "Fetched New Value: $NEW_VALUE"
+
+          # Save the new value for later use
+          echo "::set-output name=new_secret_value::$NEW_VALUE"
+
+      - name: Fetch Repository Public Key
+        id: fetch_key
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/actions/secrets/public-key)
+          
+          echo "Public Key: $RESPONSE"
+          
+          # Extract key and key ID
+          echo "::set-output name=key::$(echo $RESPONSE | jq -r '.key')"
+          echo "::set-output name=key_id::$(echo $RESPONSE | jq -r '.key_id')"
+
+      - name: Encrypt New Secret Value
+        id: encrypt_value
+        run: |
+          echo "$NEW_VALUE" | openssl rsautl -encrypt -pubin -inkey <(echo "${{ steps.fetch_key.outputs.key }}" | base64 -d) | base64 -w 0
+
+      - name: Update Github Secret
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          curl -X PUT \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "encrypted_value": "'${{ steps.encrypt_value.outputs.encrypted_value }}'",
+              "key_id": "'${{ steps.fetch_key.outputs.key_id }}'"
+            }' \
+            https://api.github.com/repos/${{ github.repository }}/actions/secrets/MY_SECRET_VALUE
