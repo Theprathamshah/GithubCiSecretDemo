@@ -35,7 +35,7 @@ jobs:
           echo "Fetched New Value: $NEW_VALUE"
 
           # Save the new value for later use
-          echo "::set-output name=new_secret_value::$NEW_VALUE"
+          echo "new_secret_value=$NEW_VALUE" >> $GITHUB_ENV
 
       - name: Fetch Repository Public Key
         id: fetch_key
@@ -45,27 +45,35 @@ jobs:
           RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             https://api.github.com/repos/${{ github.repository }}/actions/secrets/public-key)
           
-          echo "Public Key: $RESPONSE"
-          
-          # Extract key and key ID
-          echo "::set-output name=key::$(echo $RESPONSE | jq -r '.key')"
-          echo "::set-output name=key_id::$(echo $RESPONSE | jq -r '.key_id')"
+          PUBLIC_KEY=$(echo $RESPONSE | jq -r '.key')
+          KEY_ID=$(echo $RESPONSE | jq -r '.key_id')
+
+          if [[ -z "$PUBLIC_KEY" || -z "$KEY_ID" ]]; then
+            echo "Failed to fetch public key or key ID"
+            exit 1
+          fi
+
+          echo "key=$PUBLIC_KEY" >> $GITHUB_ENV
+          echo "key_id=$KEY_ID" >> $GITHUB_ENV
 
       - name: Encrypt New Secret Value
         id: encrypt_value
         run: |
-          echo "$NEW_VALUE" | openssl rsautl -encrypt -pubin -inkey <(echo "${{ steps.fetch_key.outputs.key }}" | base64 -d) | base64 -w 0
+          echo "${{ env.new_secret_value }}" | openssl rsautl -encrypt -pubin -inkey <(echo "${{ env.key }}" | base64 -d) | base64 -w 0 > encrypted_value.txt
+          echo "encrypted_value=$(cat encrypted_value.txt)" >> $GITHUB_ENV
 
       - name: Update Github Secret
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          ENCRYPTED_VALUE: ${{ env.encrypted_value }}
+          KEY_ID: ${{ env.key_id }}
         run: |
           curl -X PUT \
             -H "Authorization: token $GITHUB_TOKEN" \
             -H "Content-Type: application/json" \
             -d '{
-              "encrypted_value": "'${{ steps.encrypt_value.outputs.encrypted_value }}'",
-              "key_id": "'${{ steps.fetch_key.outputs.key_id }}'"
+              "encrypted_value": "'"$ENCRYPTED_VALUE"'",
+              "key_id": "'"$KEY_ID"'"
             }' \
-            https://api.github.com/repos/${{ github.repository }}/actions/secrets/MY_SECRET_VALUE
+            https://api.github.com/repos/$REPO/actions/secrets/MY_SECRET_VALUE
