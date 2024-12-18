@@ -42,7 +42,7 @@ jobs:
       - name: Fetch Repository Public Key
         id: fetch_key
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
         run: |
           RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
             https://api.github.com/repos/${{ github.repository }}/actions/secrets/public-key)
@@ -55,6 +55,9 @@ jobs:
             exit 1
           fi
 
+          echo "$PUBLIC_KEY"
+          echo "$KEY_ID"
+
           echo "key=$PUBLIC_KEY" >> $GITHUB_ENV
           echo "key_id=$KEY_ID" >> $GITHUB_ENV
 
@@ -66,7 +69,7 @@ jobs:
 
       - name: Update Github Secret
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           ENCRYPTED_VALUE: ${{ env.encrypted_value }}
           KEY_ID: ${{ env.key_id }}
