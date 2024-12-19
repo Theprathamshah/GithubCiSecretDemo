@@ -8,21 +8,29 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish:
-    name: Publish Image
+  update-secret:
+    name: Update GitHub Secret
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
       repository-projects: write
       actions: write
-    #   secrets: write
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Read Secret
-        id: api_call
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install libsodium-wrappers
+
+      - name: Read Current Secret Value
+        id: fetch_current_secret
         env:
           SECRET_VALUE: ${{ secrets.MY_SECRET_VALUE }}
         run: |
@@ -40,7 +48,7 @@ jobs:
           echo "new_secret_value=$NEW_VALUE" >> $GITHUB_ENV
 
       - name: Fetch Repository Public Key
-        id: fetch_key
+        id: fetch_public_key
         env:
           GITHUB_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
         run: |
@@ -49,26 +57,23 @@ jobs:
           
           PUBLIC_KEY=$(echo $RESPONSE | jq -r '.key')
           KEY_ID=$(echo $RESPONSE | jq -r '.key_id')
-          echo "$GITHUB_TOKEN"
           echo "$RESPONSE"
+
           if [[ -z "$PUBLIC_KEY" || -z "$KEY_ID" ]]; then
             echo "Failed to fetch public key or key ID"
             exit 1
           fi
 
-          echo "$PUBLIC_KEY"
-          echo "$KEY_ID"
-
           echo "key=$PUBLIC_KEY" >> $GITHUB_ENV
           echo "key_id=$KEY_ID" >> $GITHUB_ENV
 
       - name: Encrypt New Secret Value
-        id: encrypt_value
+        id: encrypt_secret_value
         run: |
-          echo "${{ env.new_secret_value }}" | openssl rsautl -encrypt -pubin -inkey <(echo "${{ env.key }}" | base64 -d) | base64 -w 0 > encrypted_value.txt
+          node ./scripts/encrypt-secret.js "${{ env.key }}" "${{ env.new_secret_value }}" > encrypted_value.txt
           echo "encrypted_value=$(cat encrypted_value.txt)" >> $GITHUB_ENV
 
-      - name: Update Github Secret
+      - name: Update GitHub Secret
         env:
           GITHUB_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
